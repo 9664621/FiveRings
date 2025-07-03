@@ -3,167 +3,61 @@ package com.macsdev.fiverings
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.geometry.Offset
 import kotlin.math.*
 
 object GameViewModel {
 
-    // --- Состояние, видимое для UI ---
+    // --- ПОРЯДОК ИНИЦИАЛИЗАЦИИ ИСПРАВЛЕН ---
+    // Сначала создаем логическую структуру...
+    val logicalRings = createLogicalRings()
+    val logicalPoints = createLogicalPoints(logicalRings)
+    val winningQuads = calculateWinningQuads(logicalPoints)
+
+    // ...и только потом создаем состояние игры, которое от них зависит.
     var gameState by mutableStateOf(createInitialGameState())
-        private set
-    var rings by mutableStateOf<List<Ring>>(emptyList())
-        private set
-    var points by mutableStateOf<List<Point>>(emptyList())
         private set
     var selectedRingId by mutableStateOf<Int?>(null)
         private set
-    var rotationButtonInfo by mutableStateOf<RotationButtonInfo?>(null)
-        private set
 
-    // --- Приватные переменные ---
-    private const val numMajorCircles = 5
-    private const val stonesInQuadToWin = 4
-    private var canvasSize = 0f
-
-    fun setupGame(width: Float, height: Float) {
-        this.canvasSize = minOf(width, height)
-
-        val majorRadius = canvasSize * 0.17f
-        val innerRadius = canvasSize * 0.25f
-        val outerRadius = canvasSize * 0.28f
-        val centerX = canvasSize / 2f
-        val centerY = canvasSize / 2f
-
-        val localRings = mutableListOf<Ring>()
-        for (i in 0 until numMajorCircles) {
-            val angle = (i.toFloat() / numMajorCircles) * 2 * PI - PI / 2
-            val majorX = centerX + cos(angle.toFloat()) * majorRadius
-            val majorY = centerY + sin(angle.toFloat()) * majorRadius
-            localRings.add(Ring(i * 2, majorX, majorY, innerRadius, RingType.INNER))
-            localRings.add(Ring(i * 2 + 1, majorX, majorY, outerRadius, RingType.OUTER))
-        }
-
-        val localPointsMap = mutableMapOf<String, Point>()
-        for (i in localRings.indices) {
-            for (j in i + 1 until localRings.size) {
-                val intersections = calculateIntersections(localRings[i], localRings[j])
-                for (p in intersections) {
-                    val key = "${p.x.roundToInt()},${p.y.roundToInt()}"
-                    val existingPoint = localPointsMap[key]
-                    if (existingPoint == null) {
-                        localPointsMap[key] = Point(key, p.x, p.y, listOf(i, j))
-                    } else {
-                        val updatedRings = (existingPoint.ringIds + i + j).distinct()
-                        localPointsMap[key] = existingPoint.copy(ringIds = updatedRings)
-                    }
-                }
-            }
-        }
-        val localPoints = localPointsMap.values.toList()
-
-        val initialBoardState = mutableMapOf<String, Player>()
-        localPoints.forEach { point ->
+    private fun createInitialGameState(): GameState {
+        val board = mutableMapOf<Int, Player>()
+        logicalPoints.forEachIndexed { index, point ->
             if (point.ringIds.size >= 2) {
-                val ring1Type = localRings.getOrNull(point.ringIds[0])?.type
-                val ring2Type = localRings.getOrNull(point.ringIds[1])?.type
-                if (ring1Type != null && ring2Type != null) {
-                    initialBoardState[point.key] = if (ring1Type == ring2Type) Player.WHITE else Player.BLACK
-                } else {
-                    initialBoardState[point.key] = Player.NONE
-                }
+                val ring1Type = logicalRings[point.ringIds[0]].type
+                val ring2Type = logicalRings[point.ringIds[1]].type
+                board[index] = if (ring1Type == ring2Type) Player.WHITE else Player.BLACK
             } else {
-                initialBoardState[point.key] = Player.NONE
+                board[index] = Player.NONE
             }
         }
-
-        val calculatedQuads = mutableListOf<List<String>>()
-        for (i in 0 until numMajorCircles) {
-            for (j in i + 1 until numMajorCircles) {
-                val cluster = localPoints.filter { p ->
-                    val doubleRingIndices = p.ringIds.map { it / 2 }.toSet()
-                    doubleRingIndices.contains(i) && doubleRingIndices.contains(j)
-                }
-                if (cluster.size >= stonesInQuadToWin) {
-                    var remainingPoints = cluster.toMutableList()
-                    while (remainingPoints.size >= stonesInQuadToWin) {
-                        val seedPoint = remainingPoints.removeAt(0)
-                        val quad = mutableListOf(seedPoint)
-                        remainingPoints.sortBy { hypot(it.x - seedPoint.x, it.y - seedPoint.y) }
-                        quad.addAll(remainingPoints.take(3))
-                        remainingPoints = remainingPoints.drop(3).toMutableList()
-                        calculatedQuads.add(quad.map { it.key })
-                    }
-                }
-            }
-        }
-
-        val newGameState = GameState(
-            boardState = initialBoardState,
-            currentPlayer = Player.WHITE,
-            lastMove = null,
-            scoreWhite = 0,
-            scoreBlack = 0,
-            winningQuads = calculatedQuads
-        )
-
-        this.rings = localRings
-        this.points = localPoints
-        this.gameState = newGameState
-        this.selectedRingId = null
-        this.rotationButtonInfo = null
+        return GameState(board, Player.WHITE, null, 0, 0)
     }
 
-    fun onCanvasTap(offset: Offset) {
-        rotationButtonInfo?.let { info ->
-            if (hypot(offset.x - info.ccwPos.x, offset.y - info.ccwPos.y) < info.radius) {
-                handleRotation(-1)
-                return
-            }
-            if (hypot(offset.x - info.cwPos.x, offset.y - info.cwPos.y) < info.radius) {
-                handleRotation(1)
-                return
-            }
-        }
-
-        val clickTolerance = canvasSize * 0.05f
-        val bestMatch = rings.minByOrNull { ring ->
-            val dist = abs(hypot(offset.x - ring.x, offset.y - ring.y) - ring.radius)
-            if (dist < clickTolerance) dist else Float.MAX_VALUE
-        }
-
-        if (bestMatch != null && abs(hypot(offset.x - bestMatch.x, offset.y - bestMatch.y) - bestMatch.radius) < clickTolerance) {
-            selectedRingId = bestMatch.id
-            val buttonRadius = canvasSize * 0.03f
-            val buttonOffset = buttonRadius * 2.5f
-            rotationButtonInfo = RotationButtonInfo(
-                ccwPos = Offset(offset.x - buttonOffset, offset.y),
-                cwPos = Offset(offset.x + buttonOffset, offset.y),
-                radius = buttonRadius
-            )
-        } else {
-            selectedRingId = null
-            rotationButtonInfo = null
-        }
+    fun onNewGame() {
+        gameState = createInitialGameState()
+        selectedRingId = null
     }
 
-    private fun handleRotation(direction: Int) {
+    fun onRingSelected(ringId: Int?) {
+        selectedRingId = ringId
+    }
+
+    fun onRotate(direction: Int) {
         val ringId = selectedRingId ?: return
+
         val currentGameState = gameState
         if (currentGameState.lastMove?.ringId == ringId && currentGameState.lastMove.direction == -direction) {
-            return
+            return // Запрет отмены хода
         }
 
-        val ringToRotate = rings.find { it.id == ringId } ?: return
-        val pointsOnRing = points.filter { it.ringIds.contains(ringId) }
-            .sortedBy { atan2(it.y - ringToRotate.y, it.x - ringToRotate.x) }
-
+        val pointsOnRing = logicalPoints.filter { it.ringIds.contains(ringId) }
         if (pointsOnRing.isEmpty()) return
 
         val currentBoard = currentGameState.boardState.toMutableMap()
-        val pointKeys = pointsOnRing.map { it.key }
-        val colors = pointKeys.mapNotNull { currentBoard[it] }
+        val pointIds = pointsOnRing.map { it.id }
+        val colors = pointIds.mapNotNull { currentBoard[it] }
 
-        if (colors.size != pointKeys.size) return
+        if (colors.size != pointIds.size) return
 
         val newColors = if (direction == 1) {
             listOf(colors.last()) + colors.dropLast(1)
@@ -171,11 +65,11 @@ object GameViewModel {
             colors.drop(1) + colors.first()
         }
 
-        pointKeys.forEachIndexed { index, key ->
-            currentBoard[key] = newColors[index]
+        pointIds.forEachIndexed { index, id ->
+            currentBoard[id] = newColors[index]
         }
 
-        val scoredPlayers = checkAndProcessQuads(currentBoard, currentGameState.winningQuads)
+        val scoredPlayers = checkAndProcessQuads(currentBoard)
         val quadsProcessed = scoredPlayers.isNotEmpty()
 
         var scoreChangeWhite = 0
@@ -194,20 +88,21 @@ object GameViewModel {
         )
 
         selectedRingId = null
-        rotationButtonInfo = null
     }
 
-    private fun checkAndProcessQuads(board: MutableMap<String, Player>, winningQuads: List<List<String>>): List<Player> {
+    private fun checkAndProcessQuads(board: MutableMap<Int, Player>): List<Player> {
         val scoredPlayers = mutableListOf<Player>()
-        val pointsToRemove = mutableSetOf<String>()
+        val pointsToRemove = mutableSetOf<Int>()
 
-        for (quadKeys in winningQuads) {
-            if (quadKeys.any { pointsToRemove.contains(it) }) continue
-            val firstPlayer = board[quadKeys.firstOrNull()]
-            if (firstPlayer == null || firstPlayer == Player.NONE) continue
-            if (quadKeys.all { board[it] == firstPlayer }) {
+        for (quad in winningQuads) {
+            if (quad.any { pointsToRemove.contains(it) }) continue
+
+            val firstPlayer = board[quad.first()] ?: Player.NONE
+            if (firstPlayer == Player.NONE) continue
+
+            if (quad.all { board[it] == firstPlayer }) {
                 scoredPlayers.add(firstPlayer)
-                pointsToRemove.addAll(quadKeys)
+                pointsToRemove.addAll(quad)
             }
         }
 
@@ -216,22 +111,92 @@ object GameViewModel {
         }
         return scoredPlayers
     }
-
-    private fun calculateIntersections(c1: Ring, c2: Ring): List<Offset> {
-        val d = hypot(c2.x - c1.x, c2.y - c1.y)
-        if (d > c1.radius + c2.radius || d < abs(c1.radius - c2.radius) || d == 0f) return emptyList()
-        val a = (c1.radius.pow(2) - c2.radius.pow(2) + d.pow(2)) / (2 * d)
-        val h = sqrt(max(0f, c1.radius.pow(2) - a.pow(2)))
-        val x0 = c1.x + a * (c2.x - c1.x) / d
-        val y0 = c1.y + a * (c2.y - c1.y) / d
-        val rx = -h * (c2.y - c1.y) / d
-        val ry = h * (c2.x - c1.x) / d
-        return listOf(Offset(x0 + rx, y0 + ry), Offset(x0 - rx, y0 - ry))
-    }
-
-    private fun createInitialGameState(): GameState = GameState(emptyMap(), Player.WHITE, null, 0, 0, emptyList())
 }
 
-private fun atan2(y: Float, x: Float): Float {
-    return kotlin.math.atan2(y.toDouble(), x.toDouble()).toFloat()
+// Функции создания логической структуры доски
+private fun createLogicalRings(): List<LogicalRing> {
+    return (0 until 10).map { id ->
+        LogicalRing(id, if (id % 2 == 0) RingType.INNER else RingType.OUTER)
+    }
+}
+
+// Эта функция теперь создает только логические связи, без координат
+private fun createLogicalPoints(rings: List<LogicalRing>): List<LogicalPoint> {
+    val tempPoints = mutableListOf<Pair<Float, Float>>()
+    val ringConnections = mutableMapOf<String, MutableList<Int>>()
+
+    // Эмулируем геометрию для нахождения пересечений
+    val size = 800f
+    val majorRadius = size * 0.17f
+    val innerRadius = size * 0.25f
+    val outerRadius = size * 0.28f
+    val centerX = size / 2f
+    val centerY = size / 2f
+
+    val tempUiRings = rings.map {
+        val angle = (it.id / 2).toFloat() / 5f * 2f * PI.toFloat() - PI.toFloat() / 2f
+        val majorX = centerX + cos(angle) * majorRadius
+        val majorY = centerY + sin(angle) * majorRadius
+        object { val id = it.id; val x = majorX; val y = majorY; val radius = if(it.type == RingType.INNER) innerRadius else outerRadius }
+    }
+
+    for (i in tempUiRings.indices) {
+        for (j in i + 1 until tempUiRings.size) {
+            val c1 = tempUiRings[i]
+            val c2 = tempUiRings[j]
+            val d = hypot(c2.x - c1.x, c2.y - c1.y)
+            if (d > c1.radius + c2.radius || d < abs(c1.radius - c2.radius) || d == 0f) continue
+
+            val a = (c1.radius.pow(2) - c2.radius.pow(2) + d.pow(2)) / (2 * d)
+            val h = sqrt(max(0f, c1.radius.pow(2) - a.pow(2)))
+            val x0 = c1.x + a * (c2.x - c1.x) / d
+            val y0 = c1.y + a * (c2.y - c1.y) / d
+
+            val rx = -h * (c2.y - c1.y) / d
+            val ry = h * (c2.x - c1.x) / d
+
+            val p1 = Pair(x0 + rx, y0 + ry)
+            val p2 = Pair(x0 - rx, y0 - ry)
+
+            listOf(p1, p2).forEach { p ->
+                val key = "${p.first.roundToInt()},${p.second.roundToInt()}"
+                if (!ringConnections.containsKey(key)) {
+                    ringConnections[key] = mutableListOf()
+                }
+                ringConnections[key]?.add(c1.id)
+                ringConnections[key]?.add(c2.id)
+            }
+        }
+    }
+
+    return ringConnections.values
+        .map { it.distinct().sorted() }
+        .distinct()
+        .mapIndexed { index, ringIds -> LogicalPoint(index, ringIds) }
+}
+
+private fun calculateWinningQuads(points: List<LogicalPoint>): List<List<Int>> {
+    val quads = mutableListOf<List<Int>>()
+    for (i in 0 until 5) {
+        for (j in i + 1 until 5) {
+            val cluster = points.filter { p ->
+                val doubleRingIndices = p.ringIds.map { it / 2 }.toSet()
+                doubleRingIndices.size == 2 && doubleRingIndices.contains(i) && doubleRingIndices.contains(j)
+            }
+            if (cluster.size >= 4) {
+                if (cluster.size > 4) { // Разделяем на 2 квада
+                    val seedPoint = cluster.first()
+                    val sortedCluster = cluster.sortedBy { p1 ->
+                        // Это очень упрощенная эмуляция расстояния без координат
+                        (p1.ringIds.sum() - seedPoint.ringIds.sum()).absoluteValue
+                    }
+                    quads.add(sortedCluster.take(4).map { it.id })
+                    quads.add(sortedCluster.takeLast(4).map { it.id })
+                } else {
+                    quads.add(cluster.map { it.id })
+                }
+            }
+        }
+    }
+    return quads.filter { it.size == 4 }.distinct()
 }

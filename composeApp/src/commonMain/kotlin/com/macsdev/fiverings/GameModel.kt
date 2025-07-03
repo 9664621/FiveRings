@@ -2,33 +2,20 @@ package com.macsdev.fiverings
 
 enum class Player { WHITE, BLACK, NONE }
 
-data class Ring(
-    val id: Int,
-    val x: Float,
-    val y: Float,
-    val radius: Float,
-    val type: RingType
-)
+// Логическое представление кольца, без координат
+data class LogicalRing(val id: Int, val type: RingType)
 
 enum class RingType { INNER, OUTER }
 
-data class Point(
-    val key: String,
-    val x: Float,
-    val y: Float,
-    val ringIds: List<Int>
-)
+// Логическое представление точки, без координат
+data class LogicalPoint(val id: Int, val ringIds: List<Int>)
 
-data class Move(
-    val ringId: Int,
-    val direction: Int
-)
+data class Move(val ringId: Int, val direction: Int)
 
 data class GameState(
-    val boardState: Map<String, Player>,
+    val boardState: Map<Int, Player>, // Карта состояний точек (ID точки -> игрок)
     val currentPlayer: Player,
     val lastMove: Move?,
     val scoreWhite: Int,
-    val scoreBlack: Int,
-    val winningQuads: List<List<String>>
+    val scoreBlack: Int
 )

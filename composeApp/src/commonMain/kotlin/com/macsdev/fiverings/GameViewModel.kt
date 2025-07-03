@@ -7,13 +7,10 @@ import kotlin.math.*
 
 object GameViewModel {
 
-    // --- ПОРЯДОК ИНИЦИАЛИЗАЦИИ ИСПРАВЛЕН ---
-    // Сначала создаем логическую структуру...
     val logicalRings = createLogicalRings()
     val logicalPoints = createLogicalPoints(logicalRings)
     val winningQuads = calculateWinningQuads(logicalPoints)
 
-    // ...и только потом создаем состояние игры, которое от них зависит.
     var gameState by mutableStateOf(createInitialGameState())
         private set
     var selectedRingId by mutableStateOf<Int?>(null)
@@ -47,7 +44,7 @@ object GameViewModel {
 
         val currentGameState = gameState
         if (currentGameState.lastMove?.ringId == ringId && currentGameState.lastMove.direction == -direction) {
-            return // Запрет отмены хода
+            return
         }
 
         val pointsOnRing = logicalPoints.filter { it.ringIds.contains(ringId) }
@@ -113,19 +110,14 @@ object GameViewModel {
     }
 }
 
-// Функции создания логической структуры доски
 private fun createLogicalRings(): List<LogicalRing> {
     return (0 until 10).map { id ->
         LogicalRing(id, if (id % 2 == 0) RingType.INNER else RingType.OUTER)
     }
 }
 
-// Эта функция теперь создает только логические связи, без координат
 private fun createLogicalPoints(rings: List<LogicalRing>): List<LogicalPoint> {
-    val tempPoints = mutableListOf<Pair<Float, Float>>()
     val ringConnections = mutableMapOf<String, MutableList<Int>>()
-
-    // Эмулируем геометрию для нахождения пересечений
     val size = 800f
     val majorRadius = size * 0.17f
     val innerRadius = size * 0.25f
@@ -146,32 +138,26 @@ private fun createLogicalPoints(rings: List<LogicalRing>): List<LogicalPoint> {
             val c2 = tempUiRings[j]
             val d = hypot(c2.x - c1.x, c2.y - c1.y)
             if (d > c1.radius + c2.radius || d < abs(c1.radius - c2.radius) || d == 0f) continue
-
             val a = (c1.radius.pow(2) - c2.radius.pow(2) + d.pow(2)) / (2 * d)
             val h = sqrt(max(0f, c1.radius.pow(2) - a.pow(2)))
             val x0 = c1.x + a * (c2.x - c1.x) / d
             val y0 = c1.y + a * (c2.y - c1.y) / d
-
             val rx = -h * (c2.y - c1.y) / d
             val ry = h * (c2.x - c1.x) / d
-
             val p1 = Pair(x0 + rx, y0 + ry)
             val p2 = Pair(x0 - rx, y0 - ry)
-
             listOf(p1, p2).forEach { p ->
                 val key = "${p.first.roundToInt()},${p.second.roundToInt()}"
-                if (!ringConnections.containsKey(key)) {
-                    ringConnections[key] = mutableListOf()
-                }
+                if (!ringConnections.containsKey(key)) ringConnections[key] = mutableListOf()
                 ringConnections[key]?.add(c1.id)
                 ringConnections[key]?.add(c2.id)
             }
         }
     }
 
-    return ringConnections.values
-        .map { it.distinct().sorted() }
-        .distinct()
+    val sortedPoints = ringConnections.entries.sortedWith(compareBy({ it.key.split(",")[1].toInt() }, { it.key.split(",")[0].toInt() }))
+
+    return sortedPoints.map { it.value.distinct().sorted() }
         .mapIndexed { index, ringIds -> LogicalPoint(index, ringIds) }
 }
 
@@ -184,12 +170,8 @@ private fun calculateWinningQuads(points: List<LogicalPoint>): List<List<Int>> {
                 doubleRingIndices.size == 2 && doubleRingIndices.contains(i) && doubleRingIndices.contains(j)
             }
             if (cluster.size >= 4) {
-                if (cluster.size > 4) { // Разделяем на 2 квада
-                    val seedPoint = cluster.first()
-                    val sortedCluster = cluster.sortedBy { p1 ->
-                        // Это очень упрощенная эмуляция расстояния без координат
-                        (p1.ringIds.sum() - seedPoint.ringIds.sum()).absoluteValue
-                    }
+                if (cluster.size > 4) {
+                    val sortedCluster = cluster.sortedBy { it.id }
                     quads.add(sortedCluster.take(4).map { it.id })
                     quads.add(sortedCluster.takeLast(4).map { it.id })
                 } else {

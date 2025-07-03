@@ -16,7 +16,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.*
@@ -56,15 +58,18 @@ fun GameScreen() {
                             currentPlayer = gameState.currentPlayer,
                             highlightColor = colorScheme.primary
                         )
-                        Spacer(Modifier.weight(1f)) // Распорка сверху
-                        GameCanvas(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                            gameState = gameState,
-                            selectedRingId = viewModel.selectedRingId,
-                            onRingSelected = { viewModel.onRingSelected(it) },
-                            onRotate = { viewModel.onRotate(it) }
-                        )
-                        Spacer(Modifier.weight(1f)) // Распорка снизу
+                        Box(
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            GameCanvas(
+                                modifier = Modifier.padding(16.dp),
+                                gameState = gameState,
+                                selectedRingId = viewModel.selectedRingId,
+                                onRingSelected = { viewModel.onRingSelected(it) },
+                                onRotate = { viewModel.onRotate(it) }
+                            )
+                        }
                         Button(
                             onClick = { viewModel.onNewGame() },
                             modifier = Modifier.padding(bottom = 16.dp)
@@ -83,7 +88,7 @@ fun GameScreen() {
                             contentAlignment = Alignment.Center
                         ) {
                             GameCanvas(
-                                modifier = Modifier.fillMaxHeight().padding(16.dp),
+                                modifier = Modifier.padding(16.dp),
                                 gameState = gameState,
                                 selectedRingId = viewModel.selectedRingId,
                                 onRingSelected = { viewModel.onRingSelected(it) },
@@ -163,19 +168,20 @@ private fun GameCanvas(
     onRotate: (Int) -> Unit
 ) {
     BoxWithConstraints(modifier = modifier.aspectRatio(1f)) {
-        val size = minOf(maxWidth.value, maxHeight.value)
+        val density = LocalDensity.current
+        val sizePx = with(density) { minOf(maxWidth, maxHeight).toPx() }
 
-        val (uiRings, uiPoints) = remember(size) { calculateGeometry(size) }
+        val (uiRings, uiPoints) = remember(sizePx) { calculateGeometry(sizePx) }
 
         Canvas(
             modifier = Modifier.fillMaxSize()
-                .pointerInput(uiRings, selectedRingId) { // Передаем uiRings в pointerInput
+                .pointerInput(uiRings, selectedRingId) {
                     detectTapGestures { offset ->
                         if (selectedRingId != null) {
-                            val buttonRadius = size * 0.03f
-                            val buttonsY = size - buttonRadius * 2
-                            val ccwButtonX = size / 2 - buttonRadius * 1.5f
-                            val cwButtonX = size / 2 + buttonRadius * 1.5f
+                            val buttonRadius = sizePx * 0.03f
+                            val buttonsY = sizePx - buttonRadius * 2
+                            val ccwButtonX = sizePx / 2 - buttonRadius * 1.5f
+                            val cwButtonX = sizePx / 2 + buttonRadius * 1.5f
 
                             if (hypot(offset.x - ccwButtonX, offset.y - buttonsY) < buttonRadius) {
                                 onRotate(-1); return@detectTapGestures
@@ -189,7 +195,7 @@ private fun GameCanvas(
                             abs(hypot(offset.x - it.x, offset.y - it.y) - it.radius)
                         }
 
-                        val tapTolerance = size * 0.05f
+                        val tapTolerance = sizePx * 0.05f
                         if (tappedRing != null && abs(hypot(offset.x - tappedRing.x, offset.y - tappedRing.y) - tappedRing.radius) < tapTolerance) {
                             onRingSelected(tappedRing.id)
                         } else {
@@ -202,7 +208,7 @@ private fun GameCanvas(
                 drawRing(ring, selectedRingId)
             }
 
-            val stoneRadius = this.size.minDimension * 0.01f
+            val stoneRadius = min(this.size.width, this.size.height) * 0.01f
             uiPoints.forEachIndexed { index, point ->
                 val player = gameState.boardState[index] ?: Player.NONE
                 if (player != Player.NONE) {
@@ -211,7 +217,7 @@ private fun GameCanvas(
             }
 
             if (selectedRingId != null) {
-                val buttonRadius = this.size.minDimension * 0.03f
+                val buttonRadius = min(this.size.width, this.size.height) * 0.03f
                 val buttonsY = this.size.height - buttonRadius * 2
                 drawRotationButtons(
                     Offset(this.size.width/2 - buttonRadius * 1.5f, buttonsY),
